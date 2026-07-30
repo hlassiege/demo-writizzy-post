@@ -1,0 +1,62 @@
+name: Publish to Writizzy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'posts/**'
+      - 'assets/**'
+      - 'scripts/publish.mjs'
+      - '.github/workflows/publish.yml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Parse and report without calling the API'
+        type: boolean
+        default: false
+
+# One publication at a time: two concurrent runs could both create the same post.
+concurrency:
+  group: writizzy-publish
+  cancel-in-progress: false
+
+# Needed to commit the post ids back to the repository.
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The script diffs the pushed range to find which posts changed.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Publish the changed posts
+        env:
+          WRITIZZY_API_KEY: ${{ secrets.WRITIZZY_API_KEY }}
+          WRITIZZY_SUBDOMAIN: ${{ vars.WRITIZZY_SUBDOMAIN }}
+          WRITIZZY_API_BASE: ${{ vars.WRITIZZY_API_BASE }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          node scripts/publish.mjs \
+            ${{ github.event_name == 'workflow_dispatch' && '--all' || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Commit the post ids
+        if: ${{ !inputs.dry_run }}
+        run: |
+          if [ -z "$(git status --porcelain .writizzy/state.json)" ]; then
+            echo "No state change."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .writizzy/state.json
+          git commit -m "chore: update Writizzy post ids [skip ci]"
+          git push
