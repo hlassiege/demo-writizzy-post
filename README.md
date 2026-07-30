@@ -1,7 +1,7 @@
 # demo-writizzy-post
 
-Publish Markdown files from a GitHub repository to a [Writizzy](https://writizzy.com) blog on
-every push, using the public v1 API. No dependencies, one script, one workflow, no state to keep.
+Publish Markdown files from a GitHub repository to a [Writizzy](https://writizzy.com) blog, using the public v1 API. 
+No dependencies.
 
 The article in `posts/` describes the mechanism and is published by it.
 
@@ -60,9 +60,8 @@ cross-posting: those are separate, explicit actions.
 The whole script rests on one API parameter: `POST /v1/blogs/{subdomain}/posts?onConflict=UPDATE`.
 
 The slug becomes the identity of the post. The first push creates it (`201`), every push after
-updates it in place (`200`). There is no id to remember, no state file, and no lookup before
-writing. Publication stays a separate call, so a bad merge can never make a draft public by
-surprise.
+updates it in place (`200`). 
+No id to remember, no state, and no lookup before writing. 
 
 ## Known rough edge
 

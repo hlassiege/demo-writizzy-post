@@ -1,7 +1,7 @@
 ---
-title: "Publish to your blog with a git push"
+title: "How to publish to your blog on Writizzy from a GitHub repository"
 slug: publish-to-writizzy-with-a-git-push
-excerpt: "Write your posts in a GitHub repository, push, and they appear on your blog. Here is the whole setup, and this article is the proof it works."
+excerpt: "Write your posts in a GitHub repository, push, and sync it on your blog. Discover how to setup your code and workflow."
 tags: [API, Automation]
 status: draft
 accessMode: FREE
@@ -9,7 +9,7 @@ accessMode: FREE
 
 Some writers do not want a text editor in a browser tab. They want their own editor, their own files, version control, pull requests, and a branch when an article is not ready. If that is you, you can keep all of it and still publish on Writizzy.
 
-This article lives in a public GitHub repository: [hlassiege/demo-writizzy-post](https://github.com/hlassiege/demo-writizzy-post). It was not written in the Writizzy editor. It was written in a Markdown file, committed, and pushed. A GitHub Action did the rest. Every correction you may read later arrived the same way: an edit, a commit, a push.
+This article lives in a public GitHub repository: [hlassiege/demo-writizzy-post](https://github.com/hlassiege/demo-writizzy-post). It was not written in the Writizzy editor. It was written in a Markdown file then sync to Writizzy with a GitHub Action. Every correction you may read later arrived the same way: edit, commit, push.
 
 It uses the public API that comes with your blog.
 
@@ -21,7 +21,7 @@ It uses the public API that comes with your blog.
 
 **3. Add the workflow.** One workflow file, one script, both in the repository above. Copy them and you are done.
 
-The repository layout is deliberately boring:
+The repository layout is deliberately simple:
 
 ```
 posts/      your articles, one Markdown file each
@@ -51,11 +51,10 @@ Only the files you touched in that push are sent. Fix a typo in one article and 
 
 ## The slug is the post
 
-Push the same file twice and you get one post, not two. That is a property of the API rather than something the script works around: a create call can carry `onConflict=UPDATE`, and from then on the slug is what identifies the post. First push creates it, every push after updates it in place. Nothing to remember between two runs, no id to store, no bookkeeping file in your repository.
+The slug is the identity of the post. Change it and you get a new post or keep it and you update the same post.
+Under the hood, it uses the `onConflict=UPDATE` parameter of the API, so you do not have to store any ID or bookkeeping file in your repository. The slug is what identifies the post.
 
-Which is why the script stays small. The part that talks to Writizzy is about fifty lines. The rest reads your Markdown.
-
-Publishing is still its own call, and it only makes the post visible. It does not send your newsletter and it does not cross-post anywhere. A publishing pipeline that could email thousands of readers on a bad merge is not one anybody should trust, so those stay deliberate actions you take when you mean them.
+Publishing is still its own call, and it only makes the post visible. It does not send your newsletter and it does not cross-post anywhere. We decided that this kind of action should be not attached to the publish API. 
 
 ## Images come along
 
