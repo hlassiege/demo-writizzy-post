@@ -1,5 +1,5 @@
 ---
-title: "How to publish to your blog on Writizzy from a GitHub repository"
+title: "Write your blog in Markdown on GitHub, publish with a push"
 slug: publish-to-writizzy-with-a-git-push
 excerpt: "Write your posts in a GitHub repository, push, and sync it on your blog. Discover how to setup your code and workflow."
 tags: [API, Automation]
@@ -7,13 +7,15 @@ status: draft
 accessMode: FREE
 ---
 
-Some writers do not want a text editor in a browser tab. They want their own editor, their own files, version control, pull requests, and a branch when an article is not ready. If that is you, you can keep all of it and still publish on Writizzy.
+Today I write almost exclusively in Writizzy, the blogging platform behind this blog. Plenty of people would rather write Markdown in a file, and I admit it has real advantages. The file is versioned, you can read its history and see what changed from one version to the next, and it stays a plain file that lives on your machine, so you never lose ownership of your writing if the platform dies.
 
-This article lives in a public GitHub repository: [hlassiege/demo-writizzy-post](https://github.com/hlassiege/demo-writizzy-post). It was not written in the Writizzy editor. It was written in a Markdown file then sync to Writizzy with a GitHub Action. Every correction you may read later arrived the same way: edit, commit, push.
+Git is not for everybody. The interface is less convenient, handling images is more painful, but the appeal makes sense to me. It is not the experience an online editor gives you, and I still wanted that way of working to be possible inside Writizzy, through an API.
 
-It uses the public API that comes with your blog.
+That is exactly what this article is about. It is one of the rare ones I wrote directly in Markdown, then synced to Writizzy with a GitHub Action. This article lives in a public GitHub repository: [hlassiege/demo-writizzy-post](https://github.com/hlassiege/demo-writizzy-post).
 
-## Three things to set up
+Let me show you how to do it.
+
+## Setting it up
 
 **1. Generate a write key.** In your blog settings, open **Developer API** and generate a key with write access. Read keys are for pulling content out (a static site build, for example) and they cannot create or change anything.
 
@@ -31,7 +33,7 @@ scripts/    the publishing script (Node, no dependencies)
 
 ## What a post looks like
 
-A post is a Markdown file with a small header:
+A post is a Markdown file with a small header. I went with front matter, the format most static site generators already use.
 
 ```markdown
 ---
@@ -45,18 +47,18 @@ status: published
 Some writers do not want a text editor in a browser tab...
 ```
 
-`status: draft` sends the post to your dashboard and leaves it invisible, so you can reread it in context before anyone else sees it. `status: published` puts it online. Flip one to the other, push, and the post appears or goes back to being a draft.
+Notice that this post is in `status: draft`. Nothing goes out immediately, so you can reread it in context before anyone else sees it. Switching it to `status: published` puts it online.
 
-Only the files you touched in that push are sent. Fix a typo in one article and the other twenty are left alone.
+I made sure the script only republishes the article you actually touched. Fix a typo in one article and the other twenty are left alone.
 
-## The slug is the post
+## How updates are handled
 
-The slug is the identity of the post. Change it and you get a new post or keep it and you update the same post.
+The slug is the identity of the post. Change it and you get a new post, keep it and you update the same one.
 Under the hood, it uses the `onConflict=UPDATE` parameter of the API, so you do not have to store any ID or bookkeeping file in your repository. The slug is what identifies the post.
 
-Publishing is still its own call, and it only makes the post visible. It does not send your newsletter and it does not cross-post anywhere. We decided that this kind of action should be not attached to the publish API. 
+Publishing is still its own call, and it only makes the post visible. It does not send your newsletter and it does not cross-post anywhere. I decided that this kind of action should not be tied to the publish API.
 
-## Images come along
+## Watch out for images
 
 Reference an image with a relative path and it gets uploaded to your media library on the way:
 
@@ -66,10 +68,10 @@ Reference an image with a relative path and it gets uploaded to your media libra
 
 The script replaces the path with the CDN URL before saving the post, so what readers get is served from the CDN and what you keep in git is the file.
 
-## Deleting is safe
+Image handling does come with a limitation. Every push of an article uploads its images again, which recreates the same files. Publishing an article once or twice is no big deal, but it is not optimal. If your content is heavy on images, you probably want to adapt the script so that it sends published versions only rather than every draft, to keep the duplicates down.
 
-Delete a Markdown file and its post is unpublished. It is not destroyed. The API exposes no hard delete, so a careless `git rm` cannot take your writing with it. The post goes back to being a draft in your dashboard, and you decide what happens next.
+## That's all
 
-## Take it
+And that is all. Have a look at [`publish.mjs`](https://github.com/hlassiege/demo-writizzy-post/blob/main/scripts/publish.mjs), the script the GitHub Action runs to publish. It is the heart of this demo, and it is what put the article you are reading online.
 
-The full source is in [the repository](https://github.com/hlassiege/demo-writizzy-post): one Node script with no dependencies, and one workflow file. Fork it, point it at your blog, and your writing lives in git from now on.
+If you have any questions, ask away.
