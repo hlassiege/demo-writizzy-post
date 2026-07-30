@@ -4,7 +4,6 @@ slug: publish-to-writizzy-with-a-git-push
 excerpt: "Write your posts in a GitHub repository, push, and sync it on your blog. Discover how to setup your code and workflow."
 tags: [API, Automation]
 status: draft
-accessMode: FREE
 ---
 
 Today I write almost exclusively in Writizzy, the blogging platform behind this blog. Plenty of people would rather write Markdown in a file, and I admit it has real advantages. The file is versioned, you can read its history and see what changed from one version to the next, and it stays a plain file that lives on your machine, so you never lose ownership of your writing if the platform dies.
