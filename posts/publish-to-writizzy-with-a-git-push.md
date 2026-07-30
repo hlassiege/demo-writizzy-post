@@ -11,23 +11,22 @@ Some writers do not want a text editor in a browser tab. They want their own edi
 
 This article lives in a public GitHub repository: [hlassiege/demo-writizzy-post](https://github.com/hlassiege/demo-writizzy-post). It was not written in the Writizzy editor. It was written in a Markdown file, committed, and pushed. A GitHub Action did the rest. Every correction you may read later arrived the same way: an edit, a commit, a push.
 
-No plugin, no beta program, nothing custom on our side. It uses the public API that ships with your blog.
+It uses the public API that comes with your blog.
 
 ## Three things to set up
 
-**1. Generate a write key.** In your blog settings, open **Developer API** and generate a key with write access. Read keys are for pulling content out (a static site build, for example) and they cannot create or change anything. Copy the key: it is shown once.
+**1. Generate a write key.** In your blog settings, open **Developer API** and generate a key with write access. Read keys are for pulling content out (a static site build, for example) and they cannot create or change anything.
 
 **2. Store it in GitHub.** In your repository settings, add a secret named `WRITIZZY_API_KEY`, and a variable named `WRITIZZY_SUBDOMAIN` holding your blog subdomain.
 
 **3. Add the workflow.** One workflow file, one script, both in the repository above. Copy them and you are done.
 
-That is the entire installation. The repository layout is deliberately boring:
+The repository layout is deliberately boring:
 
 ```
-posts/          your articles, one Markdown file each
-assets/         images referenced from your articles
-scripts/        the publishing script (Node, no dependencies)
-.writizzy/      the file that remembers which post is which
+posts/      your articles, one Markdown file each
+assets/     images referenced from your articles
+scripts/    the publishing script (Node, no dependencies)
 ```
 
 ## What a post looks like
@@ -48,7 +47,15 @@ Some writers do not want a text editor in a browser tab...
 
 `status: draft` sends the post to your dashboard and leaves it invisible, so you can reread it in context before anyone else sees it. `status: published` puts it online. Flip one to the other, push, and the post appears or goes back to being a draft.
 
-Only the files you touched are sent. Push a fix to one article and the other twenty are left alone.
+Only the files you touched in that push are sent. Fix a typo in one article and the other twenty are left alone.
+
+## The slug is the post
+
+Push the same file twice and you get one post, not two. That is a property of the API rather than something the script works around: a create call can carry `onConflict=UPDATE`, and from then on the slug is what identifies the post. First push creates it, every push after updates it in place. Nothing to remember between two runs, no id to store, no bookkeeping file in your repository.
+
+Which is why the script stays small. The part that talks to Writizzy is about fifty lines. The rest reads your Markdown.
+
+Publishing is still its own call, and it only makes the post visible. It does not send your newsletter and it does not cross-post anywhere. A publishing pipeline that could email thousands of readers on a bad merge is not one anybody should trust, so those stay deliberate actions you take when you mean them.
 
 ## Images come along
 
@@ -58,28 +65,12 @@ Reference an image with a relative path and it gets uploaded to your media libra
 ![A diagram of the flow](../assets/flow.png)
 ```
 
-The script replaces the path with the CDN URL before saving the post. Images are tracked by content, so pushing the same article again does not upload the same file twice. Change the image, and only that one goes up.
+The script replaces the path with the CDN URL before saving the post, so what readers get is served from the CDN and what you keep in git is the file.
 
-## How the same push knows to update, not duplicate
+## Deleting is safe
 
-This is the one part that needed a decision.
+Delete a Markdown file and its post is unpublished. It is not destroyed. The API exposes no hard delete, so a careless `git rm` cannot take your writing with it. The post goes back to being a draft in your dashboard, and you decide what happens next.
 
-Creating a post through the API is not idempotent. Ask twice, get two posts. So something has to remember that `posts/my-article.md` is post `abc123` on your blog. That something is `.writizzy/state.json`, a small file the Action commits back to your repository after each run. Your repository is the memory, which means you can read it, diff it, and fix it by hand if you ever need to.
+## Take it
 
-There is a second path for a post that already exists. If a file carries a slug that is already published on your blog, the script adopts that post instead of creating a new one. An article you started in the dashboard can be moved into the repository without losing its URL.
-
-Deleting a Markdown file unpublishes its post. It does not destroy it. The API deliberately exposes no hard delete, so a bad `git rm` can never take your writing with it. The post goes back to being a draft in your dashboard, and you decide.
-
-## What publishing does not do
-
-Publishing makes a post visible. That is all it does.
-
-It does not send your newsletter, and it does not cross-post to your social accounts. Those are separate actions, on purpose. A publishing script that could email thousands of readers by accident, on a bad merge, is not a publishing script anyone should trust. When you want the email to go out, you send it deliberately.
-
-## Worth knowing
-
-The public API is part of the paid plans, so this needs one of those. The write key is a real key: it can create and change posts on your blog, so keep it in GitHub secrets and nowhere else. And if you rename a Markdown file, keep it in the same push as everything else, since the Action follows renames rather than treating them as a delete plus a create.
-
-The full source is in [the repository](https://github.com/hlassiege/demo-writizzy-post): about two hundred lines of Node with no dependencies, and a workflow file. Fork it, point it at your blog, and your writing lives in git from now on.
-
-Nothing else was needed. This article is the receipt.
+The full source is in [the repository](https://github.com/hlassiege/demo-writizzy-post): one Node script with no dependencies, and one workflow file. Fork it, point it at your blog, and your writing lives in git from now on.

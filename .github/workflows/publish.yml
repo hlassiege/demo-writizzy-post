@@ -15,14 +15,13 @@ on:
         type: boolean
         default: false
 
-# One publication at a time: two concurrent runs could both create the same post.
+# One publication at a time: two pushes in a row must not race on the same post.
 concurrency:
   group: writizzy-publish
   cancel-in-progress: false
 
-# Needed to commit the post ids back to the repository.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish:
@@ -30,7 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The script diffs the pushed range to find which posts changed.
+          # The script diffs the pushed range to find which posts changed, and reads a
+          # deleted file from the previous commit to know which post to unpublish.
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -47,16 +47,3 @@ jobs:
           node scripts/publish.mjs \
             ${{ github.event_name == 'workflow_dispatch' && '--all' || '' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}
-
-      - name: Commit the post ids
-        if: ${{ !inputs.dry_run }}
-        run: |
-          if [ -z "$(git status --porcelain .writizzy/state.json)" ]; then
-            echo "No state change."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .writizzy/state.json
-          git commit -m "chore: update Writizzy post ids [skip ci]"
-          git push

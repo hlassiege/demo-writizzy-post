@@ -1,14 +1,14 @@
 # demo-writizzy-post
 
 Publish Markdown files from a GitHub repository to a [Writizzy](https://writizzy.com) blog on
-every push, using the public v1 API. No dependencies, one script, one workflow.
+every push, using the public v1 API. No dependencies, one script, one workflow, no state to keep.
 
 The article in `posts/` describes the mechanism and is published by it.
 
 ## Setup
 
 1. **Generate a write key**: in your blog settings, open *Developer API* and generate a key with
-   write access. It is shown once.
+   write access.
 2. **Add it to the repository**: `Settings → Secrets and variables → Actions`
    - secret `WRITIZZY_API_KEY`: the write key
    - variable `WRITIZZY_SUBDOMAIN`: the subdomain of the target blog
@@ -21,7 +21,6 @@ The article in `posts/` describes the mechanism and is published by it.
 posts/               one Markdown file per post
 assets/              images referenced with relative paths
 scripts/publish.mjs  the publishing script
-.writizzy/state.json file path -> post id, committed back by the workflow
 ```
 
 ## Front matter
@@ -45,16 +44,31 @@ accessMode: FREE                                # FREE | PAID (default: FREE)
 |---|---|
 | New file, `status: published` | Post created, then published |
 | New file, `status: draft` | Draft created, invisible to readers |
-| Edited file | Post updated in place, publication state follows `status` |
-| Renamed file | Same post, no duplicate |
+| Edited file | Same post updated in place, publication state follows `status` |
+| Renamed file, same slug | Same post, no duplicate |
+| Changed slug | New post (the slug is the identity of the post) |
 | Deleted file | Post unpublished, kept as a draft (the API has no hard delete) |
 | Relative image path | Uploaded to the media library, path rewritten to the CDN URL |
 
-Only the files changed by the push are sent. Images are keyed by content hash, so unchanged
-images are never re-uploaded.
+Only the files changed by the push are sent.
 
 Publishing only makes a post visible. It never sends the newsletter and never triggers
 cross-posting: those are separate, explicit actions.
+
+## Why it never duplicates
+
+The whole script rests on one API parameter: `POST /v1/blogs/{subdomain}/posts?onConflict=UPDATE`.
+
+The slug becomes the identity of the post. The first push creates it (`201`), every push after
+updates it in place (`200`). There is no id to remember, no state file, and no lookup before
+writing. Publication stays a separate call, so a bad merge can never make a draft public by
+surprise.
+
+## Known rough edge
+
+Images are re-uploaded every time a post that references them is pushed, because the API has no
+way to tell that a file it already stores is the same file. Not a problem for a post or two, worth
+knowing if you push a heavily illustrated article often.
 
 ## Run it locally
 
@@ -66,12 +80,3 @@ export WRITIZZY_SUBDOMAIN=yourblog
 node scripts/publish.mjs posts/my-article.md      # publish one file
 node scripts/publish.mjs --all                    # publish everything
 ```
-
-## Why the state file
-
-Creating a post through the API is not idempotent: two calls create two posts. And a draft
-cannot be looked up by slug, so the repository has to remember which file maps to which post id.
-That mapping is `.writizzy/state.json`, committed back by the workflow with `[skip ci]`.
-
-If a file's slug is already published on the blog, the script adopts that post instead of
-creating a new one, so a post started in the dashboard can be moved into the repository.

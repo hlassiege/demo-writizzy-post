@@ -12,15 +12,13 @@
 //   WRITIZZY_SUBDOMAIN  subdomain of the target blog
 //   WRITIZZY_API_BASE   defaults to https://api.writizzy.com
 
-import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, extname, join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const POSTS_DIR = 'posts'
-const STATE_FILE = '.writizzy/state.json'
 
 const API_BASE = (process.env.WRITIZZY_API_BASE || 'https://api.writizzy.com').replace(/\/$/, '')
 const API_KEY = process.env.WRITIZZY_API_KEY
@@ -96,18 +94,20 @@ function parseFrontMatterBlock(block) {
   return data
 }
 
-function parsePost(relPath) {
-  const raw = readFileSync(join(ROOT, relPath), 'utf8').replace(/\r\n/g, '\n')
-  if (!raw.startsWith('---\n')) {
-    throw new Error(`${relPath}: missing YAML front matter`)
-  }
-  const end = raw.indexOf('\n---', 4)
-  if (end === -1) {
-    throw new Error(`${relPath}: front matter is never closed`)
-  }
+function str(value) {
+  if (typeof value !== 'string') return undefined
+  return value.length > 0 ? value : undefined
+}
 
-  const data = parseFrontMatterBlock(raw.slice(4, end))
-  const content = raw.slice(raw.indexOf('\n', end + 1) + 1).trim()
+function parsePost(relPath, raw) {
+  const text = raw.replace(/\r\n/g, '\n')
+  if (!text.startsWith('---\n')) throw new Error(`${relPath}: missing YAML front matter`)
+
+  const end = text.indexOf('\n---', 4)
+  if (end === -1) throw new Error(`${relPath}: front matter is never closed`)
+
+  const data = parseFrontMatterBlock(text.slice(4, end))
+  const content = text.slice(text.indexOf('\n', end + 1) + 1).trim()
 
   const title = str(data.title)
   if (!title) throw new Error(`${relPath}: 'title' is required`)
@@ -132,32 +132,11 @@ function parsePost(relPath) {
   }
 }
 
-function str(value) {
-  if (typeof value !== 'string') return undefined
-  return value.length > 0 ? value : undefined
-}
-
-// --- State ----------------------------------------------------------------
-
-// Post creation is not idempotent server-side, and a draft cannot be looked up by
-// slug, so the mapping file -> post id lives in the repository. The workflow commits
-// it back after each run.
-function loadState() {
-  const path = join(ROOT, STATE_FILE)
-  if (!existsSync(path)) return { version: 1, posts: {}, media: {} }
-  const state = JSON.parse(readFileSync(path, 'utf8'))
-  return { version: 1, posts: {}, media: {}, ...state }
-}
-
-function saveState(state) {
-  const path = join(ROOT, STATE_FILE)
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
-}
+const readPost = (relPath) => parsePost(relPath, readFileSync(join(ROOT, relPath), 'utf8'))
 
 // --- API ------------------------------------------------------------------
 
-async function call(method, path, { json, form, allow404 = false } = {}) {
+async function request(method, path, { json, form, allow404 = false } = {}) {
   const headers = { Authorization: `Bearer ${API_KEY}` }
   if (json) headers['Content-Type'] = 'application/json'
 
@@ -167,20 +146,23 @@ async function call(method, path, { json, form, allow404 = false } = {}) {
     body: json ? JSON.stringify(json) : form,
   })
 
-  if (response.status === 404 && allow404) return null
+  if (response.status === 404 && allow404) return { status: 404, body: null }
   if (!response.ok) {
     throw new Error(`${method} ${path} returned ${response.status}: ${(await response.text()).slice(0, 500)}`)
   }
-  return response.status === 204 ? null : response.json()
+  return { status: response.status, body: response.status === 204 ? null : await response.json() }
 }
+
+const call = async (method, path, options) => (await request(method, path, options)).body
 
 const blogPath = (suffix = '') => `/v1/blogs/${encodeURIComponent(SUBDOMAIN)}${suffix}`
 
 // --- Media ----------------------------------------------------------------
 
-// Uploaded files are keyed by content hash: pushing a post again does not
-// re-upload its images, and editing an image uploads the new version.
-async function uploadImage(state, mdPath, imagePath, altText) {
+// Same image referenced by the cover and the body: upload it once per run.
+const uploadedThisRun = new Map()
+
+async function uploadImage(mdPath, imagePath, altText) {
   const candidates = imagePath.startsWith('/')
     ? [join(ROOT, imagePath.slice(1))]
     : [resolve(ROOT, dirname(mdPath), imagePath), resolve(ROOT, imagePath)]
@@ -188,22 +170,22 @@ async function uploadImage(state, mdPath, imagePath, altText) {
   const filePath = candidates.find((c) => existsSync(c))
   if (!filePath) throw new Error(`${mdPath}: image not found: ${imagePath}`)
 
-  const bytes = readFileSync(filePath)
-  const hash = createHash('sha256').update(bytes).digest('hex')
-  const known = state.media[hash]
-  if (known) return known.url
-
   const filename = posix.basename(imagePath.split(/[?#]/)[0])
-  const contentType = MIME_TYPES[extname(filename).toLowerCase()] || 'application/octet-stream'
-
   if (DRY_RUN) return `https://cdn.example/dry-run/${filename}`
+  if (uploadedThisRun.has(filePath)) return uploadedThisRun.get(filePath)
 
   const form = new FormData()
-  form.append('file', new Blob([bytes], { type: contentType }), filename)
+  form.append(
+    'file',
+    new Blob([readFileSync(filePath)], {
+      type: MIME_TYPES[extname(filename).toLowerCase()] || 'application/octet-stream',
+    }),
+    filename,
+  )
   if (altText) form.append('altText', altText)
 
   const media = await call('POST', blogPath('/media'), { form })
-  state.media[hash] = { url: media.url, filename }
+  uploadedThisRun.set(filePath, media.url)
   return media.url
 }
 
@@ -240,7 +222,7 @@ function codeRanges(text) {
 }
 
 // Rewrites every local image reference to the CDN URL returned by the upload.
-async function uploadLocalImages(state, post) {
+async function uploadLocalImages(post) {
   const pattern = /!\[([^\]]*)\]\(\s*([^)\s]+)([^)]*)\)/g
   const skip = codeRanges(post.content)
   const parts = []
@@ -251,100 +233,69 @@ async function uploadLocalImages(state, post) {
     if (isRemote(url)) continue
     if (skip.some(([from, to]) => match.index >= from && match.index < to)) continue
 
-    const cdnUrl = await uploadImage(state, post.path, url, alt)
+    const cdnUrl = await uploadImage(post.path, url, alt)
     parts.push(post.content.slice(cursor, match.index), `![${alt}](${cdnUrl}${trailer})`)
     cursor = match.index + full.length
   }
 
   parts.push(post.content.slice(cursor))
-  const content = parts.join('')
 
   let coverImageUrl = post.cover
   if (coverImageUrl && !isRemote(coverImageUrl)) {
-    coverImageUrl = await uploadImage(state, post.path, coverImageUrl, post.title)
+    coverImageUrl = await uploadImage(post.path, coverImageUrl, post.title)
   }
 
-  return { content, coverImageUrl }
+  return { content: parts.join(''), coverImageUrl }
 }
 
 // --- Publishing ------------------------------------------------------------
 
-async function findPublishedBySlug(slug) {
-  if (!slug || DRY_RUN) return null
-  return call('GET', blogPath(`/posts/${encodeURIComponent(slug)}`), { allow404: true })
-}
-
-async function syncPost(state, relPath) {
-  const post = parsePost(relPath)
-  const { content, coverImageUrl } = await uploadLocalImages(state, post)
+// The slug is the identity of the post: onConflict=UPDATE creates it the first time
+// and updates it every time after, so nothing has to be remembered between runs.
+async function syncPost(relPath) {
+  const post = readPost(relPath)
+  const { content, coverImageUrl } = await uploadLocalImages(post)
 
   const payload = {
     title: post.title,
+    slug: post.slug,
     content,
     excerpt: post.excerpt,
     coverImageUrl,
     tags: post.tags,
     accessMode: post.accessMode,
   }
-  for (const key of Object.keys(payload)) {
-    if (payload[key] === undefined) delete payload[key]
-  }
-
-  // Known id first, then an already-published post with the same slug (so a post
-  // written in the dashboard can be adopted by the repository), then create.
-  let known = state.posts[relPath]
-  if (!known && post.slug) {
-    const existing = await findPublishedBySlug(post.slug)
-    if (existing) known = { id: existing.id, slug: existing.slug }
-  }
 
   if (DRY_RUN) {
-    return {
-      path: relPath,
-      action: known ? 'would update' : 'would create',
-      status: post.status,
-      slug: post.slug || '(generated from the title)',
-      url: '',
-    }
+    return { path: relPath, action: 'would sync', status: post.status, slug: post.slug || '(from the title)', url: '' }
   }
 
-  let result
-  let action
-  if (known) {
-    if (post.slug && post.slug !== known.slug) payload.slug = post.slug
-    result = await call('PATCH', blogPath(`/posts/${known.id}`), { json: payload })
-    action = 'updated'
-  } else {
-    result = await call('POST', blogPath('/posts'), { json: { ...payload, slug: post.slug } })
-    action = 'created'
-  }
+  const upsert = await request('POST', blogPath('/posts?onConflict=UPDATE'), { json: payload })
+  let result = upsert.body
+  const action = upsert.status === 201 ? 'created' : 'updated'
 
   if (post.status === 'published') {
     result = await call('POST', blogPath(`/posts/${result.id}/publish`), {
       json: post.publishedAt ? { publishedAt: post.publishedAt } : {},
     })
-  } else if (action === 'updated') {
-    result = await call('POST', blogPath(`/posts/${result.id}/unpublish`), { json: {} })
+  } else if (result.publishedAt) {
+    result = await call('POST', blogPath(`/posts/${result.id}/unpublish`))
   }
 
-  state.posts[relPath] = { id: result.id, slug: result.slug }
   return { path: relPath, action, status: post.status, slug: result.slug, url: result.url }
 }
 
-// The API exposes no hard delete on purpose. Removing a Markdown file takes the post
-// off the public site and leaves it as a draft in the dashboard.
-async function retirePost(state, relPath) {
-  const known = state.posts[relPath]
-  if (!known) return { path: relPath, action: 'skipped (unknown file)', status: '', slug: '', url: '' }
+// The API exposes no hard delete on purpose. Removing a Markdown file takes the post off
+// the public site and leaves it as a draft in the dashboard, so nothing is ever lost.
+async function retirePost(relPath, slug) {
+  if (!slug) return { path: relPath, action: 'skipped (no slug)', status: '', slug: '', url: '' }
+  if (DRY_RUN) return { path: relPath, action: 'would unpublish', status: 'draft', slug, url: '' }
 
-  if (!DRY_RUN) await call('POST', blogPath(`/posts/${known.id}/unpublish`), { json: {} })
-  return {
-    path: relPath,
-    action: DRY_RUN ? 'would unpublish' : 'unpublished',
-    status: 'draft',
-    slug: known.slug,
-    url: '',
-  }
+  const published = await call('GET', blogPath(`/posts/${encodeURIComponent(slug)}`), { allow404: true })
+  if (!published) return { path: relPath, action: 'nothing to unpublish', status: '', slug, url: '' }
+
+  await call('POST', blogPath(`/posts/${published.id}/unpublish`))
+  return { path: relPath, action: 'unpublished', status: 'draft', slug, url: '' }
 }
 
 // --- File discovery --------------------------------------------------------
@@ -359,17 +310,25 @@ function allPostFiles() {
     .filter(isPostFile)
 }
 
-function changedPostFiles(state) {
+const git = (...cliArgs) => execFileSync('git', cliArgs, { cwd: ROOT, encoding: 'utf8' })
+
+// A deleted file is only known through git history, which is also where its slug is.
+function slugOfDeletedFile(relPath, ref) {
+  try {
+    return parsePost(relPath, git('show', `${ref}:${relPath}`)).slug
+  } catch {
+    return undefined
+  }
+}
+
+function changedPostFiles() {
   const before = process.env.GITHUB_EVENT_BEFORE
   const after = process.env.GITHUB_SHA || 'HEAD'
   if (!before || /^0+$/.test(before)) return null
 
   let output
   try {
-    output = execFileSync('git', ['diff', '--name-status', '--find-renames', before, after], {
-      cwd: ROOT,
-      encoding: 'utf8',
-    })
+    output = git('diff', '--name-status', '--find-renames', before, after)
   } catch {
     // Shallow clone, force push or rewritten history: fall back to a full sync.
     return null
@@ -382,22 +341,10 @@ function changedPostFiles(state) {
     const status = parts[0]?.[0]
     if (!status) continue
 
-    if (status === 'R') {
-      const [, from, to] = parts
-      // A renamed file must keep pointing at the same post, not create a second one.
-      if (isPostFile(from) && isPostFile(to) && state.posts[from]) {
-        state.posts[to] = state.posts[from]
-        delete state.posts[from]
-      } else if (isPostFile(from)) {
-        deletions.push(from)
-      }
-      if (isPostFile(to)) upserts.push(to)
-      continue
-    }
-
+    // A rename keeps the same slug, so it is just an update of the new path.
     const path = parts[parts.length - 1]
     if (!isPostFile(path)) continue
-    if (status === 'D') deletions.push(path)
+    if (status === 'D') deletions.push({ path, slug: slugOfDeletedFile(path, before) })
     else upserts.push(path)
   }
   return { upserts, deletions }
@@ -406,7 +353,9 @@ function changedPostFiles(state) {
 // --- Reporting -------------------------------------------------------------
 
 function report(results) {
-  const rows = results.map((r) => `| \`${r.path}\` | ${r.action} | ${r.status} | ${r.url ? `[${r.slug}](${r.url})` : r.slug} |`)
+  const rows = results.map(
+    (r) => `| \`${r.path}\` | ${r.action} | ${r.status} | ${r.url ? `[${r.slug}](${r.url})` : r.slug} |`,
+  )
   const table = ['| File | Action | Status | Post |', '|---|---|---|---|', ...rows].join('\n')
 
   console.log(table)
@@ -422,15 +371,13 @@ async function main() {
     throw new Error('WRITIZZY_API_KEY and WRITIZZY_SUBDOMAIN must be set')
   }
 
-  const state = loadState()
-
   let work
   if (explicitFiles.length > 0) {
     work = { upserts: explicitFiles, deletions: [] }
   } else if (ALL) {
     work = { upserts: allPostFiles(), deletions: [] }
   } else {
-    work = changedPostFiles(state) || { upserts: allPostFiles(), deletions: [] }
+    work = changedPostFiles() || { upserts: allPostFiles(), deletions: [] }
   }
 
   if (work.upserts.length === 0 && work.deletions.length === 0) {
@@ -439,11 +386,9 @@ async function main() {
   }
 
   const results = []
+  for (const path of work.upserts) results.push(await syncPost(path))
+  for (const { path, slug } of work.deletions) results.push(await retirePost(path, slug))
 
-  for (const path of work.upserts) results.push(await syncPost(state, path))
-  for (const path of work.deletions) results.push(await retirePost(state, path))
-
-  if (!DRY_RUN) saveState(state)
   report(results)
 }
 
