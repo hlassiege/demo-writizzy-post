@@ -9,7 +9,8 @@ The article in `posts/` describes the mechanism and is published by it.
 
 1. **Generate a write key**: in your blog settings, open *Developer API* and generate a key with
    write access.
-2. **Add it to the repository**: `Settings → Secrets and variables → Actions`
+2. **Add it to the repository**: `Settings → Secrets and variables → Actions`. The key has to be a
+   secret; the two others can be either a variable or a secret, whichever tab you land on.
    - secret `WRITIZZY_API_KEY`: the write key
    - variable `WRITIZZY_SUBDOMAIN`: the subdomain of the target blog
    - variable `WRITIZZY_API_BASE` (optional): defaults to `https://api.writizzy.com`

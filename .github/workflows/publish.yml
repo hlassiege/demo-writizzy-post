@@ -40,8 +40,11 @@ jobs:
       - name: Publish the changed posts
         env:
           WRITIZZY_API_KEY: ${{ secrets.WRITIZZY_API_KEY }}
-          WRITIZZY_SUBDOMAIN: ${{ vars.WRITIZZY_SUBDOMAIN }}
-          WRITIZZY_API_BASE: ${{ vars.WRITIZZY_API_BASE }}
+          # The subdomain and the base URL are not secrets, so a repository variable is
+          # their natural home. Secrets are accepted too: both live on the same settings
+          # page, under two different tabs, and picking the wrong one is an easy mistake.
+          WRITIZZY_SUBDOMAIN: ${{ vars.WRITIZZY_SUBDOMAIN || secrets.WRITIZZY_SUBDOMAIN }}
+          WRITIZZY_API_BASE: ${{ vars.WRITIZZY_API_BASE || secrets.WRITIZZY_API_BASE }}
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: |
           node scripts/publish.mjs \
